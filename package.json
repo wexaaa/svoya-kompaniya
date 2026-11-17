@@ -1,0 +1,22 @@
+{
+  "name": "svoya-kompaniya",
+  "version": "1.11.0",
+  "private": true,
+  "type": "module",
+  "description": "Локальная игра-викторина с друзьями и импортом SIQ",
+  "scripts": {
+    "start": "node server.mjs",
+    "start:local": "node launcher.mjs",
+    "start:radmin": "node launcher.mjs --radmin",
+    "start:internet": "node launcher.mjs --internet",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.12.1",
+    "fflate": "0.8.3",
+    "ws": "8.23.0"
+  }
+}

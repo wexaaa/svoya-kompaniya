@@ -1,0 +1,13 @@
+data/
+node_modules/
+runtime/
+logs/
+*.log
+*.siq
+*.zip
+.env
+.env.*
+!.env.example
+test/.runtime-*/
+.DS_Store
+Thumbs.db
