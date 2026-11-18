@@ -4,6 +4,8 @@ runtime/
 logs/
 *.log
 *.siq
+!packs/Тест новых функций.siq
+!packs/Тест режима Отвечают все.siq
 *.zip
 .env
 .env.*
