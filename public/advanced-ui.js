@@ -79,7 +79,7 @@ export function bindAdvanced(s,{act,toast,esc}){
     function geometry(){const rect=image.getBoundingClientRect(),p=parent.getBoundingClientRect(),scale=Math.min(rect.width/image.naturalWidth,rect.height/image.naturalHeight);return {left:rect.left-p.left+(rect.width-image.naturalWidth*scale)/2,top:rect.top-p.top+(rect.height-image.naturalHeight*scale)/2,width:image.naturalWidth*scale,height:image.naturalHeight*scale};}
     let shown=[];
     function draw(points){shown=points;parent.querySelectorAll('.point-marker').forEach(el=>el.remove());if(!image.naturalWidth)return;const g=geometry();for(const [i,p]of points.entries()){if(!p)continue;const marker=document.createElement('span');marker.className='point-marker '+(p.correct?'right-point':'');marker.style.left=`${g.left+p.x*g.width}px`;marker.style.top=`${g.top+p.y*g.height}px`;marker.textContent=p.correct?'✓':String(i+1);parent.append(marker);}}
-    const mine=context==='final'?s.final?.mine?.value:context==='all'?s.advanced?.entries[s.me]?.value:s.responses?.[s.me]?.value;
+    const mine=context==='final'?s.final?.mine?.value:context==='all'?s.advanced?.entries[s.me]?.value:s.responses?.[s.me]?.value??(s.me==='host'?s.responses?.[s.buzz]?.value:undefined);
     const right=s.current.rightPoints||[],initial=pendingPoints.get(key)||mine;
     const defaults=[...(initial&&typeof initial==='object'?[initial]:[]),...right.map(p=>({...p,correct:true}))];
     draw(defaults);image.addEventListener('load',()=>draw(shown));observer=new ResizeObserver(()=>draw(shown));observer.observe(image);
@@ -90,5 +90,6 @@ export function bindAdvanced(s,{act,toast,esc}){
       image.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key))return;event.preventDefault();const p={...(pendingPoints.get(key)||{x:.5,y:.5})};if(event.key==='ArrowLeft')p.x-=.01;if(event.key==='ArrowRight')p.x+=.01;if(event.key==='ArrowUp')p.y-=.01;if(event.key==='ArrowDown')p.y+=.01;p.x=Math.max(0,Math.min(1,p.x));p.y=Math.max(0,Math.min(1,p.y));choose(p);};
     }else{image.onclick=null;image.onkeydown=null;image.classList.remove('point-selectable');image.removeAttribute('role');image.removeAttribute('tabindex');image.removeAttribute('aria-label');}
     for(const b of document.querySelectorAll('[data-review-point]'))b.onclick=()=>draw([s.advanced.entries[b.dataset.reviewPoint].value,...right.map(p=>({...p,correct:true}))]);
+    for(const b of document.querySelectorAll('[data-final-point]'))b.onclick=()=>draw([s.final.participants.find(p=>p.id===b.dataset.finalPoint)?.value,...right.map(p=>({...p,correct:true}))]);
   }
 }

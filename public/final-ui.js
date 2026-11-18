@@ -41,5 +41,9 @@ export function finalHtml(s,{esc,num,mediaHtml,clockHtml}) {
     body+=`<div class="answer-box"><span class="eyebrow">Правильный ответ</span><p>${esc(s.current?.answer)}</p><div class="media-container">${mediaHtml(s.current?.answerMedia)}</div></div><div class="final-review-list">${sorted.map(p=>`<article class="final-review-card"><div class="row space"><h3>${esc(p.name)} ${p.id===s.me?'· ты':''}</h3><strong class="${p.correct?'gold':'negative'}">${num(p.balance+p.delta)}</strong></div><p class="final-written">${esc(p.answer||'Ответ не отправлен')}</p><div class="row space"><span class="muted">${p.correct?'✓ Верно':'× Неверно'} · ставка ${num(p.bet)}</span><span>${num(p.balance)} <b class="${p.correct?'gold':'negative'}">${p.correct?'+':'−'} ${num(p.bet)}</b> = ${num(p.balance+p.delta)}</span></div></article>`).join('')}</div>`;
     if(host)body+=phase==='finished'?'<button class="button primary" id="restart-button">Сыграть ещё раз ↗</button>':'<button class="button primary" id="finish-game">Завершить игру →</button>';
   }
+  if(s.current?.answerType==='point'&&((host&&phase==='final_review')||['final_results','finished'].includes(phase))){
+    const image=s.current.media?.find(m=>m.type==='image');
+    if(image)body=`<div class="question-stage with-visual final-point-review"><div class="media-container">${mediaHtml([image])}</div><div class="row">${f.participants.filter(p=>p.value&&typeof p.value==='object').map(p=>`<button class="button small ghost" data-final-point="${p.id}">${esc(p.name)} · показать точку${p.suggested===true?' ✓':p.suggested===false?' ×':''}</button>`).join('')}</div></div>`+body;
+  }
   return `${header}<div class="final-content ${['final_reading','final_answer'].includes(phase)?'final-live-content':''}">${body}</div>`;
 }
