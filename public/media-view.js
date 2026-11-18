@@ -31,7 +31,7 @@ export function syncVideoView(nextState){
   if(expanded&&!expanded.isConnected)closeVideoView();
   const activeUrls=new Set(Object.keys(state.playback||{}).flatMap(url=>{try{return [new URL(url,location.origin).href];}catch{return [];}}));
   for(const video of document.querySelectorAll('#app video[data-media]')){
-    if(!activeUrls.has(video.src)||video.closest('.host-answer'))continue;
+    if(!activeUrls.has(video.dataset.media)||video.closest('.host-answer'))continue;
     if(!bound.has(video)){
       bound.add(video);video.addEventListener('loadedmetadata',()=>syncVideoView(state));
     }

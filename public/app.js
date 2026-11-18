@@ -1,12 +1,14 @@
 import {finalHtml} from './final-ui.js';
 import {portrait,setupProfile,openProfile,syncCameras} from './profile-ui.js';
 import {syncVideoView,closeVideoView} from './media-view.js';
+import {advancedHtml,answerInput,bindAdvanced,sequenceHtml} from './advanced-ui.js';
+import {syncPreload,paintPreload,preloadReconnect,stopPreload,cachedMedia} from './preload-client.js';
 const $ = (s, root=document) => root.querySelector(s);
 const app = $('#app');
 const esc = text => String(text ?? '').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num = n => Number(n).toLocaleString('ru-RU');
 let state=null, session=null, socket=null, reconnectTimer=null, connection='connecting', meta={}, uploadBusy=false, timeOffset=0, pingMs=null, lastBuzz=null;
-let audioContext,renderedQuestionId=null,wrongFlashTimer;
+let audioContext,renderedQuestionId=null,renderedDraftScope=null,wrongFlashTimer;
 let sideTab='chat',chatUnread=0,chatSending=false,chatDraft='';
 const storage = { get(key){try{return JSON.parse(localStorage.getItem(key));}catch{return null;}}, set(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch{}}, remove(key){try{localStorage.removeItem(key);}catch{}} };
 let seatSize=storage.get('svoya:seat-size')||'normal';
@@ -15,7 +17,7 @@ function applySeatSize(value){seatSize=value;document.body.dataset.seatSize=valu
 function clockHtml(s=state){
   if(!s.deadline&&!s.paused)return '';
   if(!s.deadline&&s.pauseRemainingMs===null)return '';
-  const label=s.autoBoard?'До табло':s.status==='answering'||s.status==='final_answer'?'На ответ':'На кнопку';
+  const label=s.autoBoard?'До табло':['answering','final_answer','all_answer'].includes(s.status)?'На ответ':'На кнопку';
   return `<span class="answer-clock"><span class="timer-label">${label}</span><span class="timer" id="timer" role="timer" aria-label="${label}: осталось секунд"></span></span>`;
 }
 let mediaPrefs=storage.get('svoya:media-settings')||{volume:1,muted:false};
@@ -65,9 +67,12 @@ function connect(){
   socket.addEventListener('message',event=>{
     const data=JSON.parse(event.data);
     if(data.type==='state'){
+      const reconnected=connection!=='online';
       connection='online';timeOffset=data.state.now-Date.now();
       if(data.state.buzz && data.state.buzz!==lastBuzz)beep();lastBuzz=data.state.buzz;
-      state=data.state;render();
+      state=data.state;render();if(reconnected)preloadReconnect();
+    }else if(data.type==='preload'&&state&&data.code===state.code){
+      state.preload=data.preload;paintPreload(state);
     }else if(data.type==='chat'&&state&&data.code===state.code){
       const previous=state.chat?.at(-1)?.id;
       state.chat=data.messages;
@@ -88,13 +93,13 @@ function connect(){
 function act(action,extra={}){unlockSound();if(!state || connection!=='online' || socket?.readyState!==WebSocket.OPEN){toast('Подключение восстанавливается. Подождите.');return;}socket.send(JSON.stringify({type:'action',action,...extra}));}
 function leave(ask=true){
   if(ask&&!confirm('Выйти на главную? Комната и счёт сохранятся.'))return;
-  clearTimeout(reconnectTimer);if(socket){socket.onclose=null;socket.close();}socket=null;session=null;state=null;history.replaceState({},'','/');home();
+  stopPreload();clearTimeout(reconnectTimer);if(socket){socket.onclose=null;socket.close();}socket=null;session=null;state=null;history.replaceState({},'','/');home();
 }
 function mediaHtml(items){return (items||[]).map(m=>{
   let url;try{url=new URL(m.url,location.origin);if(!['http:','https:'].includes(url.protocol))return '';}catch{return '';}
   const source=esc(url.href);if(m.type==='image')return `<img src="${source}" alt="Иллюстрация к вопросу" loading="eager" data-media="${source}">`;
   if(m.type==='audio'||m.type==='video'){
-    const host=state?.me==='host',element=`<${m.type} src="${source}" ${host?'controls':'tabindex="-1" disablepictureinpicture disableremoteplayback controlslist="nodownload noremoteplayback"'} playsinline preload="auto" aria-label="${m.type==='audio'?'Аудио вопроса':'Видео вопроса'}" data-media="${source}"></${m.type}>`;
+    const host=state?.me==='host',element=`<${m.type} src="${esc(cachedMedia(url.href))}" ${host?'controls':'tabindex="-1" disablepictureinpicture disableremoteplayback controlslist="nodownload noremoteplayback"'} playsinline preload="auto" aria-label="${m.type==='audio'?'Аудио вопроса':'Видео вопроса'}" data-media="${source}"></${m.type}>`;
     return host?element:`<div class="controlled-media ${m.type}">${element}<div class="media-follow-label"><span>${m.type==='audio'?'Музыка / аудио':'Видео'}</span><span class="media-follow-status">Управляет ведущий</span></div></div>`;
   }return '';
 }).join('');}
@@ -152,12 +157,14 @@ function board(){
   return `<div class="area-top"><b>${esc(state.board.name)}</b><span>Осталось вопросов: ${left}</span></div><div class="board-wrap"><div class="board-table" style="--cols:${cols}">${state.board.themes.map(t=>`<div class="board-row"><div class="theme-cell">${esc(t.name)}</div>${Array.from({length:cols},(_,i)=>{const q=t.questions[i];return q?`<button class="price-cell ${q.used?'used':''}" data-question="${esc(q.id)}" ${q.used||!canSelect||connection!=='online'?'disabled':''} aria-label="${esc(t.name)}, ${q.price}${q.used?', сыгран':''}">${q.used?'—':num(q.price)}</button>`:'<span></span>';}).join('')}</div>`).join('')}</div></div><p class="board-help">${left===0?'Все вопросы раунда сыграны. '+(state.round+1<state.rounds?'Ведущий может перейти к следующему раунду.':'Ведущий может завершить игру.'):canSelect?'Выбирай тему и стоимость вопроса на табло.':`Вопрос выбирает ${esc(chooser?.name||'ведущий')}.`}</p>${state.me==='host'?`<div class="board-controls"><small>Раунд ${state.round+1} из ${state.rounds}</small><div class="row">${state.round+1<state.rounds?'<button class="button small ghost" id="next-round">Следующий раунд →</button>':''}<button class="button small ghost" id="finish-game">Завершить игру</button></div></div>`:''}`;
 }
 function stage(){
+  const advanced=advancedHtml(state,{esc,num,mediaHtml,clockHtml});if(advanced)return advanced;
   const q=state.current,host=state.me==='host',responding=state.players.find(p=>p.id===state.buzz);
   const attempted=state.attempted.includes(state.me),passed=(state.passed||[]).includes(state.me),participant=!state.questionPlayers||state.questionPlayers.includes(state.me),available=!state.paused&&['reading','buzzing'].includes(state.status)&&!attempted&&!passed&&participant;
   const answerOnStage=state.status==='revealed'&&q.answerMedia?.length>0,mainMedia=answerOnStage?q.answerMedia:q.media;
   const myChoice=state.optionSelections?.[state.me],canChoose=q.options?.length>0&&!state.paused&&!host&&connection==='online'&&state.status==='answering'&&state.buzz===state.me&&!Number.isInteger(myChoice);
   const passNames=(state.passed||[]).map(id=>state.players.find(p=>p.id===id)?.name).filter(Boolean);
-  const status={reading:q.options?.length?'Сначала нажми «Знаю ответ», затем выбери вариант.':'Кнопка ответа открыта. Кто знает ответ?',buzzing:q.options?.length?'Сначала нажми «Знаю ответ», затем выбери вариант.':'Кнопка ответа открыта. Кто знает ответ?',answering:`Отвечает <strong>${esc(responding?.name||'игрок')}</strong> · ${Number.isInteger(myChoice)?'Твой вариант принят. Ждём оценки ведущего.':!state.deadline?'Вариант выбран. Ждём оценки ведущего.':canChoose?'Выбери вариант · 15 секунд на ответ':'15 секунд на ответ'}`,revealed:state.autoBoard?'Верный ответ! Автоматический переход к табло через 5 секунд.':'Ответ открыт. Можно возвращаться к табло.'}[state.status]+(passNames.length?` <span class="passed-summary">Пас: ${passNames.map(esc).join(', ')}</span>`:'');
+  const response=state.responses?.[state.buzz],structured=['number','point'].includes(q.answerType);
+  const status={reading:'Кнопка ответа открыта. Кто знает ответ?',buzzing:q.options?.length?'Сначала нажми «Знаю ответ», затем выбери вариант.':structured?'Нажми «Знаю ответ», затем отправь число или выбери точку.':'Кнопка ответа открыта. Кто знает ответ?',answering:`Отвечает <strong>${esc(responding?.name||'игрок')}</strong> · ${response?`${esc(response.text)}${host&&response.suggested!==null?` · ${response.suggested?'Попадает в допуск':'За пределами допуска'}`:''}`:Number.isInteger(myChoice)?'Твой вариант принят. Ждём оценки ведущего.':!state.deadline?'Ответ отправлен. Ждём оценки ведущего.':`На ответ ${q.answerDuration||15} сек.`}`,revealed:state.autoBoard?'Автоматический переход к табло через 5 секунд.':'Ответ открыт. Можно возвращаться к табло.'}[state.status]+(passNames.length?` <span class="passed-summary">Пас: ${passNames.map(esc).join(', ')}</span>`:'');
   let controls='';
   if(host){
     if(state.status==='answering')controls='<button class="button good" id="half-button">✓ ½ баллов</button><button class="button good" id="correct-button">✓ Верно</button><button class="button good" id="double-button">✓ ×2 баллов</button><button class="button ghost" id="cancel-answer-button">0 · Случайно</button><button class="button bad" id="wrong-button">× Неверно</button>';
@@ -173,7 +180,9 @@ function stage(){
     const label=`Выбрать вариант ${o.key||index+1}${o.text?': '+o.text:''}`;
     return `<div class="answer-option ${chosenBy.length?'selected':''} ${canChoose?'can-choose':''}"><b>${esc(o.key||index+1)}</b><span>${esc(o.text)}</span><div class="media-container">${mediaHtml(o.media)}</div>${chosenBy.length?`<small class="option-selected-label">${chosenBy.map(esc).join(' · ')}</small>`:''}${!host?`<button type="button" class="option-hit" data-option="${index}" aria-label="${esc(label)}" aria-pressed="${myChoice===index}" ${!canChoose?'disabled':''}></button>`:''}</div>`;
   }).join('')}</div>`:'';
-  return `<div class="area-top"><b>${esc(state.board.name)}</b><span>${state.status==='revealed'?'Разбор вопроса':'Вопрос в игре'}</span></div><div class="question-stage ${(mainMedia||[]).some(m=>["image","video"].includes(m.type))?"with-visual":""} ${answerOnStage?'showing-answer-media':''}"><div class="question-meta"><span class="question-category">Категория · ${esc(q.theme)}</span><strong>${num(q.price)}</strong>${answerOnStage?'<span class="answer-stage-label">Правильный ответ</span>':''}${clockHtml()}</div><p class="question-text">${esc(answerOnStage?q.answer:q.text)}</p><div class="media-container">${mediaHtml(mainMedia)}</div>${options}<div class="question-status">${status}</div>${q.answer!==undefined&&!answerOnStage?`<div class="answer-box ${state.status!=='revealed'?'host-answer':''}"><span class="eyebrow">${state.status==='revealed'?'Правильный ответ':'Ответ · виден только ведущему'}</span><p>${esc(q.answer)}</p><div class="media-container">${mediaHtml(q.answerMedia)}</div></div>`:''}</div><div class="question-controls">${controls}</div>`;
+  const typedInput=structured&&!host&&state.status==='answering'&&state.buzz===state.me?answerInput(state,{esc,allowed:!state.paused}):'';
+  const allResults=state.status==='revealed'&&state.advanced?.all?`<div class="all-results">${Object.entries(state.advanced.entries).map(([id,e])=>`<span>${esc(state.players.find(p=>p.id===id)?.name)}: ${esc(e.text)} <b class="${e.correct?'gold':'negative'}">${e.delta>=0?'+':''}${num(e.delta)}</b></span>`).join('')}</div>`:'';
+  return `<div class="area-top"><b>${esc(state.board.name)}</b><span>${state.status==='revealed'?'Разбор вопроса':'Вопрос в игре'}</span></div><div class="question-stage ${(mainMedia||[]).some(m=>["image","video"].includes(m.type))?"with-visual":""} ${answerOnStage?'showing-answer-media':''}"><div class="question-meta"><span class="question-category">Категория · ${esc(q.theme)}</span><strong>${num(q.price)}</strong>${state.advanced?.noRisk?'<span class="pill">Без риска</span>':''}${answerOnStage?'<span class="answer-stage-label">Правильный ответ</span>':''}${clockHtml()}${sequenceHtml(state)}</div><p class="question-text">${esc(answerOnStage?q.answer:q.text)}</p><div class="media-container">${mediaHtml(mainMedia)}</div>${options}${typedInput}<div class="question-status">${status}</div>${allResults}${q.answer!==undefined&&!answerOnStage?`<div class="answer-box ${state.status!=='revealed'?'host-answer':''}"><span class="eyebrow">${state.status==='revealed'?'Правильный ответ':'Ответ · виден только ведущему'}</span><p>${esc(q.answer)}</p><div class="media-container">${mediaHtml(q.answerMedia)}</div></div>`:''}</div><div class="question-controls">${controls}</div>`;
 }
 function results(){const sorted=[...state.players].sort((a,b)=>b.score-a.score),max=sorted[0]?.score,winners=sorted.filter(p=>p.score===max);return `<div class="area-top"><b>Итоги игры</b><span>${esc(state.pack.name)}</span></div><div class="result-stage"><div class="trophy">✦</div><span class="eyebrow">Вот это компания</span><h2>${winners.length===1?`Побеждает ${esc(winners[0].name)}!`:'Победа на двоих? Или даже больше!'}</h2><p>Спасибо за игру. Ещё по одной?</p><div class="podium">${sorted.map((p,i)=>`<div class="player"><span class="place">${sorted.findIndex(x=>x.score===p.score)+1}</span>${portrait(p,i+1,esc)}<div class="player-copy"><b>${esc(p.name)}</b></div><strong>${num(p.score)}</strong></div>`).join('')}</div>${state.me==='host'?'<button class="button primary" id="restart-button">Сыграть ещё раз ↗</button>':'<p class="muted">Ведущий может запустить новую игру.</p>'}</div>`;}
 function render(){
@@ -190,10 +199,13 @@ function render(){
   const chatInput=$('#chat-input'),chatCursor=chatInput?{start:chatInput.selectionStart,end:chatInput.selectionEnd}:null;
   if(chatInput)chatDraft=chatInput.value;
   const chatList=$('#chat-messages'),chatScroll=chatList&&chatList.scrollHeight-chatList.scrollTop-chatList.clientHeight>40?chatList.scrollTop:null;
-  const drafts=[...app.querySelectorAll('.final-input')].map(el=>({id:el.id,value:el.value,start:el.selectionStart,end:el.selectionEnd}));
+  const draftScope=[state.code,state.current?.id,state.status,state.buzz,state.advanced?.auction?.turn,state.sequence?.index].join('|');
+  const drafts=renderedDraftScope===draftScope?[...app.querySelectorAll('.final-input')].map(el=>({id:el.id,value:el.value,start:el.selectionStart,end:el.selectionEnd})):[];
+  renderedDraftScope=draftScope;
   const title=state.status==='lobby'?'Комната для своих':state.status==='finished'?'Отлично сыграли':state.pack.name;
   app.innerHTML=`<div class="room-head"><div class="room-title"><div><span class="eyebrow">${state.me==='host'?'Ты — ведущий':'Ты — в игре'}</span><h1>${esc(title)}</h1></div><span class="connection ${connection==='online'?'':'offline'}"><i class="status-dot"></i>${connection==='online'?'На связи':'Переподключение…'}</span></div><div class="room-actions"><button class="room-code" id="copy-code" title="Скопировать код"><span>Комната</span><strong>${esc(state.code)}</strong><span>⧉</span></button><button class="button small primary" id="invite-button">Пригласить ↗</button><button class="button small ghost" id="profile-button">Фото / камера</button><button class="button small primary media-permission" id="enable-media" hidden title="Браузер просит одно нажатие для автоматического воспроизведения со звуком">Разрешить звук</button><label class="media-volume" for="media-volume">Громкость<input id="media-volume" type="range" min="0" max="100" step="1" value="${Math.round(mediaPrefs.volume*100)}"><output id="volume-value">${mediaPrefs.muted?"выкл":Math.round(mediaPrefs.volume*100)+"%"}</output></label><button class="button small ghost leave-button" id="leave-button">Выйти</button></div></div><div class="room-layout">${sidebar()}<section class="game-area">${state.final&&(state.status.startsWith('final_')||state.status==='finished')?finalHtml(state,{esc,num,mediaHtml,clockHtml}):state.status==='lobby'?lobby():state.status==='board'?board():state.status==='finished'?results():stage()}</section>${playerDeck()}</div>`;
   for(const element of app.querySelectorAll('[data-media]')){const old=media.get(element.dataset.media);if(old)element.replaceWith(old);}
+  if(state.status==='lobby')$('.settings')?.insertAdjacentHTML('beforeend',`<label class="setting">Режим<select id="mode-setting" ${state.me!=='host'?'disabled':''}><option value="classic" ${state.mode==='classic'?'selected':''}>Кто первым нажал</option><option value="all" ${state.mode==='all'?'selected':''}>Отвечают все · по порядку</option></select></label>`);
   for(const player of state.players){const badge=app.querySelector(`[data-ping-player="${player.id}"]`);if(badge)paintPlayerPing(badge,player);}
   $('#profile-button').onclick=openProfile;syncCameras(state);
   $('#seat-size').addEventListener('change',event=>applySeatSize(event.target.value));
@@ -234,7 +246,7 @@ function render(){
     (row.querySelector('.host-player-controls')||row).append(button);
   }
   for(const button of app.querySelectorAll('[data-kick]'))button.onclick=()=>{if(confirm('Удалить игрока из комнаты?'))act('kick',{player:button.dataset.kick});};
-  for(const id of ['minus-setting','seconds-setting','lock-setting'])$( '#'+id)?.addEventListener('change',()=>act('settings',{minus:$('#minus-setting')?.checked,seconds:$('#seconds-setting')?.value,locked:$('#lock-setting')?.checked}));
+  for(const id of ['minus-setting','seconds-setting','lock-setting','mode-setting'])$( '#'+id)?.addEventListener('change',()=>act('settings',{minus:$('#minus-setting')?.checked,seconds:$('#seconds-setting')?.value,locked:$('#lock-setting')?.checked,mode:$('#mode-setting')?.value}));
   $('#siq-file')?.addEventListener('change',upload);
   bind('#final-start','final_start');bind('#final-open-answers','final_open_answers');bind('#final-publish','final_publish');
   $('#final-fill-bets')?.addEventListener('click',()=>{if(confirm('Завершить приём ставок? Неотправленные ставки будут равны 0.'))act('final_fill_bets');});
@@ -249,8 +261,8 @@ function render(){
   if($('#score-dialog').open)updateScorePreview();
   clearTimeout(wrongFlashTimer);
   const flashRemaining=(state.wrongAnswer?.until||0)-Date.now()-timeOffset;
-  if(flashRemaining>0){const card=app.querySelector(`[data-seat="${state.wrongAnswer.player}"]`);if(card){card.classList.add('wrong-flash');wrongFlashTimer=setTimeout(()=>card.classList.remove('wrong-flash'),flashRemaining);}}
-  setupMedia();updateTimer();
+  if(flashRemaining>0){const cards=(state.wrongAnswer.players||[state.wrongAnswer.player]).map(id=>app.querySelector(`[data-seat="${id}"]`)).filter(Boolean);cards.forEach(card=>card.classList.add('wrong-flash'));wrongFlashTimer=setTimeout(()=>cards.forEach(card=>card.classList.remove('wrong-flash')),flashRemaining);}
+  bindAdvanced(state,{act,toast,esc});syncPreload(state,act);setupMedia();updateTimer();
 }
 function setMediaPreferences(value){
   mediaPrefs={volume:value.volume,muted:Boolean(value.muted)};storage.set('svoya:media-settings',mediaPrefs);
@@ -281,7 +293,7 @@ function setupMedia(){
 }
 function playbackFor(el){
   if(!state||!el.isConnected||el.dataset.mediaQuestion!==state.current?.id)return null;
-  const entry=Object.entries(state.playback||{}).find(([url])=>new URL(url,location.origin).href===el.src);
+  const entry=Object.entries(state.playback||{}).find(([url])=>new URL(url,location.origin).href===el.dataset.media);
   if(!entry)return null;
   const playback=entry[1],duration=Number.isFinite(el.duration)?el.duration:playback.duration;
   let position=playback.position+(playback.playing?Math.max(0,(Date.now()+timeOffset-playback.updated)/1000):0);

@@ -8,9 +8,11 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createRoom, addPlayer, authenticate, action, tick, view } from './lib/game.mjs';
 import { importSiq } from './lib/siq.mjs';
 import { demoPack } from './lib/demo.mjs';
+import {advancedDemoPack,demoTone} from './lib/demo-advanced.mjs';
 import {shareSettings} from './lib/network.mjs';
 import {probeLatency,recordPong,playerLatencies,PING_INTERVAL_MS} from './lib/latency.mjs';
 import {cameraLink,validateAvatar} from './lib/profile.mjs';
+import {allQuestionMedia,reportPreload,preloadView} from './lib/preload.mjs';
 
 const base = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(process.env.DATA_DIR || path.join(base, 'data'));
@@ -22,6 +24,7 @@ for (const name of fs.readdirSync(dataDir).filter(n => /^[A-Z2-9]{6}\.json$/.tes
   try {
     const room=JSON.parse(fs.readFileSync(path.join(dataDir,name),'utf8'));
     for(const [index,round]of room.pack.rounds.entries())if(!round.type&&index===room.pack.rounds.length-1&&/финал|final/i.test(round.name))round.type='final';
+    delete room.preloadProgress;
     room.pack.warnings=room.pack.warnings.map(w=>w.replace('Аукционы, «коты», финальные ставки и другие особые механики играются как обычные вопросы.','Аукционы, «коты» и другие особые вопросы обычных раундов играются без специальных механик.'));
     rooms.set(room.code,room);
   }
@@ -45,6 +48,10 @@ function sendLatencies(room){
   const online=connected(room.code),measurements=playerLatencies(peers,room.code);
   const packet=JSON.stringify({type:'latency',code:room.code,players:room.players.map(p=>({id:p.id,online:online.has(p.id),pingMs:online.has(p.id)?measurements.get(p.id)?.ms??null:null}))});
   for(const ws of peers)if(ws.code===room.code&&ws.userId==='host'&&ws.readyState===WebSocket.OPEN)ws.send(packet);
+}
+function preloadChanged(room){
+  const packet=JSON.stringify({type:'preload',code:room.code,preload:preloadView(room,connected(room.code))});
+  for(const ws of peers)if(ws.code===room.code&&ws.readyState===WebSocket.OPEN)ws.send(packet);
 }
 function changed(room,chatOnly=false) {
   persist(room);
@@ -72,7 +79,7 @@ async function read(req, max) {
 const bearer = req => String(req.headers.authorization || '').replace(/^Bearer /,'');
 const getRoom = code => { const room=rooms.get(String(code || '').toUpperCase()); if(!room) throw new Error('Комната не найдена. Проверьте код.'); return room; };
 const mime = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.svg':'image/svg+xml','.ico':'image/x-icon'};
-const assetsIn = q => [...(q.media || []), ...(q.answerMedia || []), ...(q.options || []).flatMap(o=>o.media || [])];
+const assetsIn = allQuestionMedia;
 function installPack(room, imported) {
   const dest=path.join(dataDir,'media',room.code);fs.mkdirSync(dest,{recursive:true});
   for(const asset of imported.assets){fs.writeFileSync(path.join(dest,asset.id),asset.data);fs.writeFileSync(path.join(dest,asset.id+'.mime'),asset.mime);}
@@ -83,7 +90,7 @@ function installPack(room, imported) {
 const server = http.createServer(async (req,res) => {
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Referrer-Policy','same-origin');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data: blob:; media-src 'self' https: http: blob:; connect-src 'self' ws: wss: https://turnservers.vdo.ninja; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: http: data: blob:; media-src 'self' https: http: blob:; connect-src 'self' ws: wss: https: http:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'");
   try {
     const url = new URL(req.url, 'http://localhost');
     if(req.method==='POST'&&url.pathname==='/api/shutdown'){
@@ -98,8 +105,8 @@ const server = http.createServer(async (req,res) => {
       let publicUrl=process.env.PUBLIC_URL || '';
       try {publicUrl=fs.readFileSync(path.join(dataDir,'public-url.txt'),'utf8').trim();}catch{}
       const sharing=shareSettings({port,mode:process.env.SHARE_MODE||'local',publicUrl});
-      const library=fs.existsSync(path.join(base,'packs'))?fs.readdirSync(path.join(base,'packs')).filter(n=>n.toLowerCase().endsWith('.siq')).map(n=>({id:n,name:n.replace(/\.siq$/i,'')})):[];
-      return json(res,200,{title:'Своя компания',version:'1.11.0',...sharing,library,maxPlayers:12});
+      const library=[{id:'mechanics',name:'Новые механики · пробный набор'},...(fs.existsSync(path.join(base,'packs'))?fs.readdirSync(path.join(base,'packs')).filter(n=>n.toLowerCase().endsWith('.siq')).map(n=>({id:n,name:n.replace(/\.siq$/i,'')})):[])];
+      return json(res,200,{title:'Своя компания',version:'1.12.0',...sharing,library,maxPlayers:12});
     }
     if (req.method === 'POST' && url.pathname === '/api/create') {
       rateLimit(req,'create',10);
@@ -116,6 +123,7 @@ const server = http.createServer(async (req,res) => {
     }
     if (req.method === 'POST' && url.pathname === '/api/action') {
       const body=JSON.parse((await read(req,8192)).toString()), room=getRoom(body.code), user=authenticate(room,bearer(req));
+      if(body.action==='preload_progress'){reportPreload(room,user,body);preloadChanged(room);return json(res,200,{ok:true});}
       if(tick(room))changed(room); action(room,user,body); changed(room,body.action==='chat'); return json(res,200,{ok:true});
     }
     if(req.method==='POST'&&url.pathname==='/api/profile'){
@@ -163,6 +171,7 @@ const server = http.createServer(async (req,res) => {
       const body=JSON.parse((await read(req,4096)).toString()),room=getRoom(body.code),user=authenticate(room,bearer(req));
       if(user.id!=='host'||room.status!=='lobby')throw new Error('Пакет меняет ведущий в лобби.');
       if(body.id==='demo'){room.pack=demoPack();room.revision++;changed(room);return json(res,200,{ok:true});}
+      if(body.id==='mechanics'){room.pack=advancedDemoPack();room.revision++;changed(room);return json(res,200,{ok:true});}
       const id=String(body.id||'');
       if(path.basename(id)!==id||!id.toLowerCase().endsWith('.siq'))throw new Error('Пакет не найден.');
       const file=path.join(base,'packs',id);if(!fs.existsSync(file))throw new Error('Пакет не найден.');
@@ -192,7 +201,10 @@ const server = http.createServer(async (req,res) => {
       res.writeHead(status,{'Content-Type':contentType,'Content-Length':end-start+1,'Accept-Ranges':'bytes','Cache-Control':'private, max-age=3600'});
       return fs.createReadStream(dest,{start,end}).pipe(res);
     }
-    if(req.method==='GET' && ['/', '/index.html','/app.js','/media-view.js','/profile-ui.js','/camera-client.js','/vendor/vdoninja-sdk.js','/vendor/crypto-js.js','/vendor/VDONINJA-LICENSE.txt','/vendor/CRYPTOJS-LICENSE.txt','/final-ui.js','/style.css','/favicon.svg'].includes(url.pathname)) {
+    if(req.method==='GET'&&url.pathname==='/demo/tone.wav'){
+      const audio=demoTone();res.writeHead(200,{'Content-Type':'audio/wav','Content-Length':audio.length,'Cache-Control':'public, max-age=3600'});return res.end(audio);
+    }
+    if(req.method==='GET' && ['/', '/index.html','/app.js','/advanced-ui.js','/preload-client.js','/media-view.js','/profile-ui.js','/camera-client.js','/vendor/vdoninja-sdk.js','/vendor/crypto-js.js','/vendor/VDONINJA-LICENSE.txt','/vendor/CRYPTOJS-LICENSE.txt','/final-ui.js','/style.css','/advanced.css','/favicon.svg','/demo/point.svg'].includes(url.pathname)) {
       const file=path.join(base,'public',url.pathname==='/'?'index.html':url.pathname.slice(1));
       res.writeHead(200,{'Content-Type':mime[path.extname(file)] || 'application/octet-stream','Cache-Control':'no-cache'});
       return fs.createReadStream(file).pipe(res);
@@ -214,6 +226,7 @@ wss.on('connection',ws => {
         ws.code=room.code;ws.auth=body.token;ws.userId=user.id;peers.add(ws);clearTimeout(authTimeout);broadcast(room);probeLatency(ws);
       } else if(body.type==='action') {
         const room=getRoom(ws.code),user=authenticate(room,ws.auth);
+        if(body.action==='preload_progress'){reportPreload(room,user,body);preloadChanged(room);return;}
         // Process immediately in one event-loop turn: only the first received buzz wins.
         if(tick(room))changed(room);
         action(room,user,body);changed(room,body.action==='chat');
