@@ -1,6 +1,10 @@
 const pendingPoints=new Map();let observer;
 const kind=q=>q?.answerType||(q?.options?.length?'select':'text');
 const labels={stake:'Аукцион',secret:'Кот в мешке',secretPublicPrice:'Кот в мешке · открытая цена',secretNoQuestion:'Кот без вопроса',noRisk:'Вопрос без риска',forAll:'Отвечают все',stakeAll:'Ставки для всех'};
+function stakeBar({form,id,min,max,step=1,submit,num,actions=''}){
+  const unavailable=min>max,increment=Math.max(1,step),lower=unavailable?max:min,upper=unavailable?max:min+Math.floor((max-min)/increment)*increment;
+  return `<div class="stake-dock"><form id="${form}" class="stake-bar"><label class="visually-hidden" for="${id}">Сумма ставки</label><input class="final-input stake-amount" id="${id}" type="number" min="${lower}" max="${upper}" step="${increment}" value="${lower}" required ${unavailable?'disabled':''}><div class="stake-slider-field"><label class="visually-hidden" for="${id}-slider">Выбор суммы ползунком</label><input class="stake-slider" id="${id}-slider" data-stake-slider="${id}" type="range" min="${lower}" max="${upper}" step="${increment}" value="${lower}" ${lower===upper?'disabled':''}><div class="stake-limits" aria-hidden="true"><span>${num(lower)}</span><span>${num(upper)}</span></div></div><button class="button primary stake-submit" ${unavailable?'disabled':''}>${submit}</button></form><div class="stake-extra"><span class="stake-hint">${unavailable?'Недостаточно баллов для повышения — можно спасовать.':lower===upper?`Доступна ставка ${num(lower)}`:`От ${num(lower)} до ${num(upper)}${increment>1?` · шаг ${num(increment)}`:''}`}</span><div class="stake-extra-actions">${actions}</div></div></div>`;
+}
 export function sequenceHtml(s){return s.sequence&&s.sequence.total>1?`<span class="sequence-label">Этап ${s.sequence.index+1} / ${s.sequence.total}</span>${s.me==='host'&&s.sequence.hasNext?'<button class="button small ghost" id="next-content">Следующий этап →</button>':''}`:'';}
 export function answerInput(s,{esc,context='regular',allowed=true}){
   const q=s.current,k=kind(q),entry=context==='all'?s.advanced.entries?.[s.me]:context==='final'?s.final?.mine?.answer!==null?{text:s.final?.mine?.answer}:null:s.responses?.[s.me];
@@ -17,21 +21,23 @@ export function advancedHtml(s,{esc,num,mediaHtml,clockHtml}){
   const player=id=>s.players.find(p=>p.id===id)?.name||'Игрок';
   const hidden=['auction','secret','secret_price','all_bet'].includes(s.status);
   if(hidden){
-    let body='';
+    let body='',dock='';
     if(s.status==='auction'){
       const auction=a.auction,turn=auction.turn,can=host||s.me===turn,max=auction.limits.find(p=>p.id===turn)?.max||q.price,min=auction.leader?auction.bid+1:q.price;
-      body=`<h2>Аукцион за право ответить</h2><p>Ставку делает <strong>${esc(player(turn))}</strong>.</p><p class="auction-current">${auction.leader?`Лидирует ${esc(player(auction.leader))} · <b>${num(auction.bid)}</b>`:`Начальная стоимость: ${num(q.price)}`}</p><p class="muted">Можно поставить весь свой счёт. При небольшом счёте доступна номинальная стоимость вопроса.</p>${can?`<form id="auction-form" class="special-form"><label for="auction-bet">Ставка от ${num(min)} до ${num(max)}</label><input class="final-input" id="auction-bet" type="number" min="${min}" max="${max}" step="1" value="${Math.min(min,max)}" required><div class="row"><button class="button primary" ${min>max?'disabled':''}>Сделать ставку</button><button type="button" class="button ghost" id="auction-allin" ${min>max?'disabled':''}>Ва-банк · ${num(max)}</button></div></form><button class="button ghost" id="auction-pass">Пас на аукционе</button>`:'<div class="final-sealed">Ждём ставку игрока.</div>'}<div class="final-presence">${s.players.map(p=>`<div><b>${esc(p.name)}</b><span>${auction.passed.includes(p.id)?'Пас':auction.leader===p.id?num(auction.bid):auction.turn===p.id?'Сейчас ставит':'Ждёт'}</span></div>`).join('')}</div>`;
+      body=`<h2>Аукцион за право ответить</h2><p>Ставку делает <strong>${esc(player(turn))}</strong>.</p><p class="auction-current">${auction.leader?`Лидирует ${esc(player(auction.leader))} · <b>${num(auction.bid)}</b>`:`Начальная стоимость: ${num(q.price)}`}</p><p class="muted">Можно поставить весь свой счёт. При небольшом счёте доступна номинальная стоимость вопроса.</p>${!can?'<div class="final-sealed">Ждём ставку игрока.</div>':''}<div class="final-presence">${s.players.map(p=>`<div><b>${esc(p.name)}</b><span>${auction.passed.includes(p.id)?'Пас':auction.leader===p.id?num(auction.bid):auction.turn===p.id?'Сейчас ставит':'Ждёт'}</span></div>`).join('')}</div>`;
+      if(can)dock=stakeBar({form:'auction-form',id:'auction-bet',min,max,submit:'Сделать ставку',num,actions:`<button type="button" class="button small ghost" id="auction-allin" ${min>max?'disabled':''}>Ва-банк · ${num(max)}</button><button type="button" class="button small ghost" id="auction-pass">Пас</button>${host?'<button type="button" class="button small ghost" id="reveal-button">Пропустить вопрос</button>':''}`});
     }else if(s.status==='secret'){
       const can=host||s.me===a.selector;
       body=`<h2>Кому достанется кот?</h2><p>Получателя выбирает <strong>${esc(player(a.selector))}</strong>.</p>${q.theme?`<p class="muted">Категория: ${esc(q.theme)}</p>`:''}${a.type==='secretPublicPrice'?`<p>Стоимость: ${num(a.special.min)}–${num(a.special.max)}</p>`:''}<div class="special-recipients">${a.candidates.map(id=>`<button class="button" data-secret-player="${id}" ${!can?'disabled':''}>${esc(player(id))}</button>`).join('')}</div>${!a.candidates.length?'<p>Нет доступного получателя. Ведущий может пропустить вопрос.</p>':''}`;
     }else if(s.status==='secret_price'){
       const can=host||s.me===a.recipient,min=a.special.min??q.price,max=a.special.max??min;
-      body=`<h2>Кот для ${esc(player(a.recipient))}</h2><p>${can?'Выбери стоимость вопроса.':'Получатель выбирает стоимость вопроса.'}</p>${can?`<form class="special-form" id="secret-price-form"><label for="secret-price">От ${num(min)} до ${num(max)}${a.special.step>1?` · шаг ${num(a.special.step)}`:''}</label><input class="final-input" id="secret-price" type="number" min="${min}" max="${max}" step="${a.special.step||1}" value="${min}" required><button class="button primary">${a.type==='secretNoQuestion'?'Получить баллы':'Открыть вопрос'} →</button></form>`:''}`;
+      body=`<h2>Кот для ${esc(player(a.recipient))}</h2><p>${can?'Выбери стоимость вопроса ползунком внизу.':'Получатель выбирает стоимость вопроса.'}</p>`;
+      if(can)dock=stakeBar({form:'secret-price-form',id:'secret-price',min,max,step:a.special.step||1,submit:a.type==='secretNoQuestion'?'Получить баллы':'Отправить',num,actions:host?'<button type="button" class="button small ghost" id="reveal-button">Пропустить вопрос</button>':''});
     }else{
       const mine=a.bets.find(p=>p.id===s.me);
       body=`<h2>Скрытые ставки для всех</h2><p>Сначала ставки, затем вопрос и одновременные ответы.</p>${mine?mine.submitted?'<div class="final-sealed">✓ Ставка принята</div>':`<form class="special-form" id="all-bet-form"><label for="all-bet">От 0 до ${num(mine.max)}</label><input class="final-input" id="all-bet" type="number" min="0" max="${mine.max}" step="1" required><button class="button primary">Зафиксировать ставку</button></form>`:''}<div class="final-presence">${a.bets.map(p=>`<div><b>${esc(player(p.id))}</b><span>${p.submitted?'✓ Принято':'Ожидаем'}</span></div>`).join('')}</div>${host?'<button class="button ghost" id="all-fill-bets">Завершить приём · неподанные ставки = 0</button>':''}`;
     }
-    return `${heading}<div class="special-stage"><span class="eyebrow">${title}</span>${body}</div>${host&&s.status!=='all_bet'?'<div class="question-controls"><button class="button ghost" id="reveal-button">Пропустить и показать ответ</button></div>':''}`;
+    return `${heading}<div class="special-stage ${dock?'with-stake-dock':''}"><span class="eyebrow">${title}</span>${body}</div>${dock|| (host&&s.status!=='all_bet'?'<div class="question-controls"><button class="button ghost" id="reveal-button">Пропустить и показать ответ</button></div>':'')}`;
   }
   if(!a.all||!['all_answer','all_review'].includes(s.status))return null;
   const review=s.status==='all_review',mine=a.entries?.[s.me],can=!host&&!mine&&s.questionPlayers.includes(s.me)&&!s.paused;
@@ -51,6 +57,15 @@ export function advancedHtml(s,{esc,num,mediaHtml,clockHtml}){
 export function bindAdvanced(s,{act,toast,esc}){
   const find=id=>document.getElementById(id),send=(action,extra={})=>act(action,{question:s.current?.id,...extra});
   const bind=(id,fn)=>find(id)?.addEventListener('click',fn),form=(id,fn)=>find(id)?.addEventListener('submit',event=>{event.preventDefault();fn();});
+  for(const slider of document.querySelectorAll('[data-stake-slider]')){
+    const amount=find(slider.dataset.stakeSlider),min=Number(slider.min),max=Number(slider.max),step=Number(slider.step)||1;
+    const clamp=value=>Math.max(min,Math.min(max,min+Math.round((value-min)/step)*step));
+    const paint=()=>{const percent=max>min?(Number(slider.value)-min)/(max-min)*100:0;slider.style.setProperty('--stake-fill',`${percent}%`);slider.setAttribute('aria-valuetext',`${Number(slider.value).toLocaleString('ru-RU')} баллов`);};
+    const fromAmount=(normalize=false)=>{const value=amount.valueAsNumber;if(Number.isFinite(value)){slider.value=String(clamp(value));if(normalize)amount.value=slider.value;}else if(normalize)amount.value=slider.value;paint();};
+    slider.addEventListener('input',()=>{amount.value=slider.value;paint();});
+    amount.addEventListener('input',()=>fromAmount());amount.addEventListener('change',()=>fromAmount(true));amount.addEventListener('blur',()=>fromAmount(true));
+    fromAmount(true);
+  }
   bind('next-content',()=>send('next_stage'));
   const turn=s.advanced?.auction?.turn;
   form('auction-form',()=>send('auction_bid',{bet:Number(find('auction-bet').value),player:turn}));
