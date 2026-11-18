@@ -106,7 +106,7 @@ const server = http.createServer(async (req,res) => {
       try {publicUrl=fs.readFileSync(path.join(dataDir,'public-url.txt'),'utf8').trim();}catch{}
       const sharing=shareSettings({port,mode:process.env.SHARE_MODE||'local',publicUrl});
       const library=[{id:'mechanics',name:'Новые механики · пробный набор'},...(fs.existsSync(path.join(base,'packs'))?fs.readdirSync(path.join(base,'packs')).filter(n=>n.toLowerCase().endsWith('.siq')).map(n=>({id:n,name:n.replace(/\.siq$/i,'')})):[])];
-      return json(res,200,{title:'Своя компания',version:'1.12.0',...sharing,library,maxPlayers:12});
+      return json(res,200,{title:'Своя компания',version:'1.12.1',...sharing,library,maxPlayers:12});
     }
     if (req.method === 'POST' && url.pathname === '/api/create') {
       rateLimit(req,'create',10);

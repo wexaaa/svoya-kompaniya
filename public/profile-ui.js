@@ -3,9 +3,9 @@ const $ = selector => document.querySelector(selector);
 const frames = new Map();
 let layer, scheduled = false, currentState, context, slotObserver;
 
-export function portrait(user, index, esc) {
+export function portrait(user, index, esc, answer='') {
   const photo = /^\/avatars\/[a-f0-9]{32}\.png$/.test(user.avatarUrl || '') ? `<img src="${esc(user.avatarUrl)}" alt="Аватар: ${esc(user.name)}">` : esc(user.name.trim().slice(0,2).toUpperCase());
-  return `<div class="portrait ${user.cameraUrl?'with-camera':''}" data-camera-slot="${esc(user.id)}"><span class="avatar a${index%4}">${photo}</span></div>${user.cameraUrl?`<a class="camera-popout" href="${esc(user.cameraUrl)}" target="_blank" rel="noopener noreferrer">Открыть видео ↗</a>`:''}`;
+  return `<div class="portrait ${user.cameraUrl?'with-camera':''} ${answer?'has-player-answer':''}" data-camera-slot="${esc(user.id)}"><span class="avatar a${index%4}">${photo}</span>${answer?`<span class="player-answer-overlay ${answer.length>80?'long-answer':''}" title="${esc(answer)}" role="status"><span>${esc(answer)}</span></span>`:''}</div>${user.cameraUrl?`<a class="camera-popout" href="${esc(user.cameraUrl)}" target="_blank" rel="noopener noreferrer">Открыть видео ↗</a>`:''}`;
 }
 
 // Video nodes stay connected outside the replaced game DOM across score updates.
@@ -35,6 +35,16 @@ export function syncCameras(state) {
   for(const [id,user] of wanted)if(!frames.has(id)){
     const frame=document.createElement('div');frame.setAttribute('aria-label',`Камера: ${user.name}`);frame.className='camera-frame';
     layer.append(frame);frames.set(id,{frame,url:user.cameraUrl,stop:startCamera(frame,user.cameraUrl)});
+  }
+  for(const [id,entry]of frames){
+    const text=state?.playerAnswers?.[id]||'';
+    entry.frame.classList.toggle('has-player-answer',Boolean(text));
+    let overlay=entry.frame.querySelector('.player-answer-overlay');
+    if(text){
+      if(!overlay){overlay=document.createElement('span');overlay.className='player-answer-overlay';overlay.append(document.createElement('span'));entry.frame.append(overlay);}
+      if(overlay.firstChild.textContent!==text)overlay.firstChild.textContent=text;
+      overlay.title=text;overlay.classList.toggle('long-answer',text.length>80);
+    }else overlay?.remove();
   }
   positionFrames();schedulePosition();
 }

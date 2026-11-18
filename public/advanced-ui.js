@@ -8,11 +8,12 @@ function stakeBar({form,id,min,max,step=1,submit,num,actions=''}){
 export function sequenceHtml(s){return s.sequence&&s.sequence.total>1?`<span class="sequence-label">Этап ${s.sequence.index+1} / ${s.sequence.total}</span>${s.me==='host'&&s.sequence.hasNext?'<button class="button small ghost" id="next-content">Следующий этап →</button>':''}`:'';}
 export function answerInput(s,{esc,context='regular',allowed=true}){
   const q=s.current,k=kind(q),entry=context==='all'?s.advanced.entries?.[s.me]:context==='final'?s.final?.mine?.answer!==null?{text:s.final?.mine?.answer}:null:s.responses?.[s.me];
-  if(entry)return `<div class="final-sealed">✓ Ответ принят${entry.text?`: <strong>${esc(entry.text)}</strong>`:''}. Ждём проверки.</div>`;
+  if(entry)return context==='regular'?'':`<div class="final-sealed">✓ Ответ принят${entry.text?`: <strong>${esc(entry.text)}</strong>`:''}. Ждём проверки.</div>`;
   if(!allowed)return '';
   if(k==='select')return '';
   const key=`${s.code}|${q.id}|${context}`,point=pendingPoints.get(key);
-  return `<form class="structured-form" id="structured-answer" data-answer-context="${context}"><label for="structured-value">${k==='number'?'Ответ числом':k==='point'?'Выбери точку на изображении':'Твой ответ'}</label>${k==='point'?`<p class="point-help" id="point-coordinate">${point?`Выбрано: ${(point.x*100).toFixed(1)}%, ${(point.y*100).toFixed(1)}%`:'Нажми на нужное место картинки. Точку можно изменить до отправки.'}</p>`:k==='number'?'<input class="final-input" id="structured-value" type="text" inputmode="decimal" maxlength="40" required autocomplete="off" placeholder="Введите число">':'<textarea class="final-input" id="structured-value" rows="2" maxlength="2000" required placeholder="Напиши ответ"></textarea>'}<button class="button primary" type="submit" ${k==='point'&&!point?'disabled':''}>Отправить ответ →</button></form>`;
+  const optional=context==='regular',required=optional?'':'required';
+  return `<form class="structured-form" id="structured-answer" data-answer-context="${context}"><label for="structured-value">${k==='number'?'Ответ числом':k==='point'?'Точка на картинке':'Твой ответ'}${optional?' · необязательно':''}</label>${k==='point'?`<p class="point-help" id="point-coordinate">${point?`Выбрано: ${(point.x*100).toFixed(1)}%, ${(point.y*100).toFixed(1)}%`:'Нажми на нужное место картинки. Точку можно изменить до отправки.'}</p>`:k==='number'?`<input class="final-input" id="structured-value" type="text" inputmode="decimal" maxlength="40" ${required} autocomplete="off" placeholder="${optional?'Число — если отвечаешь письменно':'Введите число'}">`:optional?'<input class="final-input" id="structured-value" type="text" maxlength="2000" autocomplete="off" placeholder="Можно ответить голосом или написать">':'<textarea class="final-input" id="structured-value" rows="2" maxlength="2000" required placeholder="Напиши ответ"></textarea>'}<button class="button primary" type="submit" ${optional||k==='point'&&!point?'disabled':''}>Отправить ответ →</button>${optional?'<p class="optional-answer-hint">Можно ответить голосом в Discord. Ведущий может оценить ответ без отправки.</p>':''}</form>`;
 }
 export function advancedHtml(s,{esc,num,mediaHtml,clockHtml}){
   const a=s.advanced,host=s.me==='host',q=s.current;if(!a||!q)return null;
@@ -79,7 +80,13 @@ export function bindAdvanced(s,{act,toast,esc}){
   for(const b of document.querySelectorAll('[data-final-option]'))b.onclick=()=>send('final_answer',{value:Number(b.dataset.finalOption)});
   for(const b of document.querySelectorAll('[data-all-judge]'))b.onclick=()=>send('all_judge',{player:b.dataset.allJudge,correct:b.dataset.correct==='true'});
   const inputForm=find('structured-answer'),context=inputForm?.dataset.answerContext,key=`${s.code}|${s.current?.id}|${context}`;
+  if(context==='regular'){
+    const input=find('structured-value'),button=inputForm.querySelector('button[type="submit"]');
+    const update=()=>{button.disabled=!input?.value.trim();};
+    if(input){input.addEventListener('input',update);update();}
+  }
   form('structured-answer',()=>{
+    if(context==='regular'&&kind(s.current)!=='point'&&!find('structured-value')?.value.trim())return;
     let value;if(kind(s.current)==='point')value=pendingPoints.get(key);
     else if(kind(s.current)==='number'){
       const raw=find('structured-value').value.trim().replace(',','.');value=raw===''?NaN:Number(raw);
@@ -99,6 +106,7 @@ export function bindAdvanced(s,{act,toast,esc}){
     const defaults=[...(initial&&typeof initial==='object'?[initial]:[]),...right.map(p=>({...p,correct:true}))];
     draw(defaults);image.addEventListener('load',()=>draw(shown));observer=new ResizeObserver(()=>draw(shown));observer.observe(image);
     if(inputForm){
+      if(context==='regular'&&pendingPoints.has(key))inputForm.querySelector('button[type="submit"]').disabled=false;
       const choose=p=>{pendingPoints.set(key,p);draw([p]);find('point-coordinate').textContent=`Выбрано: ${(p.x*100).toFixed(1)}%, ${(p.y*100).toFixed(1)}%`;inputForm.querySelector('button').disabled=false;};
       image.classList.add('point-selectable');image.tabIndex=0;image.setAttribute('role','button');image.setAttribute('aria-label','Выбрать точку на картинке. Стрелки перемещают точку.');
       image.onclick=event=>{const g=geometry(),p=parent.getBoundingClientRect(),x=(event.clientX-p.left-g.left)/g.width,y=(event.clientY-p.top-g.top)/g.height;if(x>=0&&x<=1&&y>=0&&y<=1)choose({x,y});};
