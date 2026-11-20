@@ -54,3 +54,9 @@ test('avatar answer renders escaped text over portrait without changing seat ide
   const html=portrait({id:'a',name:'Аня',avatarUrl:'/avatars/'+'a'.repeat(32)+'.png'},1,esc,'<img src=x onerror=alert(1)>');
   assert.ok(html.includes('has-player-answer'));assert.ok(html.includes('player-answer-overlay'));assert.ok(html.includes('&lt;img'));assert.ok(!html.includes('<img src=x'));assert.ok(html.includes('data-camera-slot="a"'));
 });
+test('player card can move its camera link into the compact actions menu',()=>{
+  const user={id:'a',name:'Аня',cameraUrl:'https://vdo.ninja/?view=anya'};
+  assert.ok(portrait(user,1,esc).includes('Открыть видео'));
+  const cardPortrait=portrait(user,1,esc,'',false);
+  assert.ok(cardPortrait.includes('with-camera'));assert.ok(!cardPortrait.includes('Открыть видео'));
+});

@@ -104,14 +104,26 @@ function mediaHtml(items){return (items||[]).map(m=>{
   }return '';
 }).join('');}
 function playersHtml(){
-  const occupied=state.players.map((p,i)=>`<div class="player player-seat ${p.id===state.me?'me':''} ${p.id===state.buzz&&state.status==='answering'?'responding':''} ${p.id===state.chooser?'choosing':''} ${(state.passed||[]).includes(p.id)?'has-passed':''}" data-seat="${p.id}">
-    ${portrait(p,i+1,esc,state.playerAnswers?.[p.id]||'')}<div class="player-copy"><b title="${esc(p.name)}">${esc(p.name)}${p.id===state.me?' · ты':''}</b>
-    <small>${(state.passed||[]).includes(p.id)?'Пас':!p.online?'○ Не в сети':state.chooser===p.id&&['lobby','board','revealed'].includes(state.status)?state.status==='lobby'?'Первый ход':'Выбирает вопрос':state.status==='lobby'?p.ready?'✓ Готов к игре':'● В комнате':p.id===state.buzz&&state.status==='answering'?'Отвечает':'● В игре'}</small>
-    ${state.me==='host'?`<span class="player-ping" data-ping-player="${p.id}"></span>`:''}</div>
-    <button class="score-button ${p.score<0?'negative':''}" data-score="${p.id}" ${state.me!=='host'?'disabled':''} title="${state.me==='host'?'Изменить счёт':'Очки'}">${num(p.score)}</button>
-    ${state.me==='host'&&state.status==='lobby'?`<button class="text-button seat-remove" data-kick="${p.id}" aria-label="Удалить ${esc(p.name)}">×</button>`:''}
-    ${state.me==='host'?`<div class="host-player-controls"><button class="button small ghost" data-add-score="${p.id}" ${state.final?'disabled':''} aria-label="Добавить или снять баллы: ${esc(p.name)}">± Баллы</button><button class="button small ${state.chooser===p.id?'good':'ghost'}" data-give-turn="${p.id}" ${state.final||state.board.final||!['lobby','board','revealed'].includes(state.status)||state.chooser===p.id?'disabled':''} title="Передать право выбора следующего вопроса" aria-label="Передать ход: ${esc(p.name)}">${state.chooser===p.id?'Ход здесь':'Передать ход'}</button></div>`:''}</div>`).join('');
-  const empty=Array.from({length:Math.max(0,3-state.players.length)},()=>'<div class="player player-seat empty-seat" aria-label="Свободное место игрока"><span class="avatar empty-avatar" aria-hidden="true">＋</span><div class="player-copy"><b>Свободное место</b><small>Ждём игрока</small></div><span class="empty-score">—</span></div>').join('');
+  const occupied=state.players.map((p,i)=>{
+    const passed=(state.passed||[]).includes(p.id);
+    const choosing=p.id===state.chooser&&['lobby','board','revealed'].includes(state.status);
+    const answering=p.id===state.buzz&&state.status==='answering';
+    const status=passed?'Пас':!p.online?'Не в сети':choosing?state.status==='lobby'?'Первый ход':'Выбирает вопрос':state.status==='lobby'?p.ready?'Готов к игре':'В комнате':answering?'Отвечает':'В игре';
+    const menu=`<details class="player-menu"><summary aria-label="Меню игрока ${esc(p.name)}" title="Действия с игроком">⋮</summary><div class="player-menu-panel">
+      <span class="player-menu-status">${esc(status)}</span>
+      ${state.me==='host'?`<span class="player-ping" data-ping-player="${p.id}"></span>`:''}
+      ${p.cameraUrl?`<a class="button small ghost camera-popout" href="${esc(p.cameraUrl)}" target="_blank" rel="noopener noreferrer">Открыть видео</a>`:''}
+      ${state.me==='host'?`<div class="host-player-controls"><button class="button small ghost" data-add-score="${p.id}" ${state.final?'disabled':''} aria-label="Добавить или снять баллы: ${esc(p.name)}">± Баллы</button><button class="button small ${state.chooser===p.id?'good':'ghost'}" data-give-turn="${p.id}" ${state.final||state.board.final||!['lobby','board','revealed'].includes(state.status)||state.chooser===p.id?'disabled':''} title="Передать право выбора следующего вопроса" aria-label="Передать ход: ${esc(p.name)}">${state.chooser===p.id?'Ход здесь':'Передать ход'}</button></div>`:''}
+      ${state.me==='host'&&state.status==='lobby'?`<button class="button small ghost danger seat-remove" data-kick="${p.id}">Удалить игрока</button>`:''}
+    </div></details>`;
+    return `<div class="player player-seat ${p.id===state.me?'me':''} ${answering?'responding':''} ${p.id===state.chooser?'choosing':''} ${passed?'has-passed':''}" data-seat="${p.id}">
+      <div class="player-card-head"><span class="player-state ${!p.online?'offline':answering?'answering':p.id===state.chooser?'choosing':''}">${!p.online?'○':answering?'●':p.id===state.chooser?'★':'●'}</span>${menu}</div>
+      ${portrait(p,i+1,esc,state.playerAnswers?.[p.id]||'',false)}
+      <div class="player-copy"><b title="${esc(p.name)}">${esc(p.name)}${p.id===state.me?' · ты':''}</b><small>${esc(status)}</small></div>
+      <button class="score-button ${p.score<0?'negative':''}" data-score="${p.id}" ${state.me!=='host'?'disabled':''} title="${state.me==='host'?'Изменить счёт':'Очки'}">${num(p.score)}</button>
+    </div>`;
+  }).join('');
+  const empty=Array.from({length:Math.max(0,3-state.players.length)},()=>'<div class="player player-seat empty-seat" aria-label="Свободное место игрока"><div class="player-card-head"><span class="player-state offline">○</span></div><span class="avatar empty-avatar" aria-hidden="true">＋</span><div class="player-copy"><b>Свободное место</b><small>Ждём игрока</small></div><span class="empty-score">—</span></div>').join('');
   return occupied+empty;
 }
 function paintPlayerPing(badge,player){
@@ -241,9 +253,9 @@ function render(){
   for(const button of app.querySelectorAll('[data-give-turn]'))button.onclick=()=>act('give_turn',{player:button.dataset.giveTurn});
   if(state.me==='host')for(const row of app.querySelectorAll('.player-deck .player[data-seat]')){
     const player=row.querySelector('[data-score]')?.dataset.score;if(!player)continue;
-    const button=document.createElement('button');button.className='text-button';button.textContent='↗';button.title='Ссылка для возвращения игрока на своё место';button.setAttribute('aria-label','Вернуть игрока на своё место');
+    const button=document.createElement('button');button.className='button small ghost player-rejoin';button.textContent='Ссылка входа';button.title='Ссылка для возвращения игрока на своё место';button.setAttribute('aria-label','Вернуть игрока на своё место');
     button.onclick=async()=>{try{const result=await request('/api/rejoin-link',{code:state.code,player});meta=await request('/api/info');await copy(`${shareOrigin()}/?room=${state.code}#seat=${result.token}`,'Личная ссылка игрока скопирована. Отправь её этому игроку — его счёт сохранится.');}catch(error){toast(error.message);}};
-    (row.querySelector('.host-player-controls')||row).append(button);
+    (row.querySelector('.host-player-controls')||row.querySelector('.player-menu-panel')||row).append(button);
   }
   for(const button of app.querySelectorAll('[data-kick]'))button.onclick=()=>{if(confirm('Удалить игрока из комнаты?'))act('kick',{player:button.dataset.kick});};
   for(const id of ['minus-setting','seconds-setting','lock-setting','mode-setting'])$( '#'+id)?.addEventListener('change',()=>act('settings',{minus:$('#minus-setting')?.checked,seconds:$('#seconds-setting')?.value,locked:$('#lock-setting')?.checked,mode:$('#mode-setting')?.value}));

@@ -3,9 +3,9 @@ const $ = selector => document.querySelector(selector);
 const frames = new Map();
 let layer, scheduled = false, currentState, context, slotObserver;
 
-export function portrait(user, index, esc, answer='') {
+export function portrait(user, index, esc, answer='', showCameraLink=true) {
   const photo = /^\/avatars\/[a-f0-9]{32}\.png$/.test(user.avatarUrl || '') ? `<img src="${esc(user.avatarUrl)}" alt="Аватар: ${esc(user.name)}">` : esc(user.name.trim().slice(0,2).toUpperCase());
-  return `<div class="portrait ${user.cameraUrl?'with-camera':''} ${answer?'has-player-answer':''}" data-camera-slot="${esc(user.id)}"><span class="avatar a${index%4}">${photo}</span>${answer?`<span class="player-answer-overlay ${answer.length>80?'long-answer':''}" title="${esc(answer)}" role="status"><span>${esc(answer)}</span></span>`:''}</div>${user.cameraUrl?`<a class="camera-popout" href="${esc(user.cameraUrl)}" target="_blank" rel="noopener noreferrer">Открыть видео ↗</a>`:''}`;
+  return `<div class="portrait ${user.cameraUrl?'with-camera':''} ${answer?'has-player-answer':''}" data-camera-slot="${esc(user.id)}"><span class="avatar a${index%4}">${photo}</span>${answer?`<span class="player-answer-overlay ${answer.length>80?'long-answer':''}" title="${esc(answer)}" role="status"><span>${esc(answer)}</span></span>`:''}</div>${user.cameraUrl&&showCameraLink?`<a class="camera-popout" href="${esc(user.cameraUrl)}" target="_blank" rel="noopener noreferrer">Открыть видео</a>`:''}`;
 }
 
 // Video nodes stay connected outside the replaced game DOM across score updates.
